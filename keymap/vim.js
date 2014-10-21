@@ -166,18 +166,19 @@
     { keys: 'Y', type: 'operatorMotion', operator: 'yank', motion: 'moveToEol', motionArgs: { inclusive: true }, operatorMotionArgs: { visualLine: true }},
     { keys: 'C', type: 'operatorMotion', operator: 'change', motion: 'moveToEol', motionArgs: { inclusive: true }, operatorMotionArgs: { visualLine: true }},
     { keys: '~', type: 'operatorMotion', operator: 'swapcase', operatorArgs: { shouldMoveCursor: true }, motion: 'moveByCharacters', motionArgs: { forward: true }},
+    { keys: '<C-w>', type: 'operatorMotion', operator: 'delete', motion: 'moveByWords', motionArgs: { forward: false, wordEnd: false }, context: 'insert' },
     // Actions
     { keys: '<C-i>', type: 'action', action: 'jumpListWalk', actionArgs: { forward: true }},
     { keys: '<C-o>', type: 'action', action: 'jumpListWalk', actionArgs: { forward: false }},
     { keys: '<C-e>', type: 'action', action: 'scroll', actionArgs: { forward: true, linewise: true }},
     { keys: '<C-y>', type: 'action', action: 'scroll', actionArgs: { forward: false, linewise: true }},
-    { keys: 'a', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'charAfter' }},
-    { keys: 'A', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'eol' }},
+    { keys: 'a', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'charAfter' }, context: 'normal' },
+    { keys: 'A', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'eol' }, context: 'normal' },
     { keys: 'A', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'endOfSelectedArea' }, context: 'visual' },
-    { keys: 'i', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'inplace' }},
+    { keys: 'i', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'inplace' }, context: 'normal' },
     { keys: 'I', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { insertAt: 'firstNonBlank' }},
-    { keys: 'o', type: 'action', action: 'newLineAndEnterInsertMode', isEdit: true, interlaceInsertRepeat: true, actionArgs: { after: true }},
-    { keys: 'O', type: 'action', action: 'newLineAndEnterInsertMode', isEdit: true, interlaceInsertRepeat: true, actionArgs: { after: false }},
+    { keys: 'o', type: 'action', action: 'newLineAndEnterInsertMode', isEdit: true, interlaceInsertRepeat: true, actionArgs: { after: true }, context: 'normal' },
+    { keys: 'O', type: 'action', action: 'newLineAndEnterInsertMode', isEdit: true, interlaceInsertRepeat: true, actionArgs: { after: false }, context: 'normal' },
     { keys: 'v', type: 'action', action: 'toggleVisualMode' },
     { keys: 'V', type: 'action', action: 'toggleVisualMode', actionArgs: { linewise: true }},
     { keys: '<C-v>', type: 'action', action: 'toggleVisualMode', actionArgs: { blockwise: true }},
@@ -190,7 +191,7 @@
     { keys: 'q<character>', type: 'action', action: 'enterMacroRecordMode' },
     // Handle Replace-mode as a special case of insert mode.
     { keys: 'R', type: 'action', action: 'enterInsertMode', isEdit: true, actionArgs: { replace: true }},
-    { keys: 'u', type: 'action', action: 'undo' },
+    { keys: 'u', type: 'action', action: 'undo', context: 'normal' },
     { keys: 'u', type: 'action', action: 'changeCase', actionArgs: {toLower: true}, context: 'visual', isEdit: true },
     { keys: 'U',type: 'action', action: 'changeCase', actionArgs: {toLower: false}, context: 'visual', isEdit: true },
     { keys: '<C-r>', type: 'action', action: 'redo' },
@@ -229,16 +230,18 @@
       function lookupKey(e) {
         var keyCode = e.keyCode;
         if (modifierCodes.indexOf(keyCode) != -1) { return; }
-        var hasModifier = e.ctrlKey || e.shiftKey || e.metaKey || e.ctrlKey;
+        var hasModifier = e.ctrlKey || e.metaKey;
         var key = CodeMirror.keyNames[keyCode];
         key = specialKey[key] || key;
         var name = '';
         if (e.ctrlKey) { name += 'C-'; }
         if (e.altKey) { name += 'A-'; }
-        if (mac && e.metaKey || (!hasModifier || e.shiftKey) && key.length < 2) {
+        if (mac && e.metaKey || (!hasModifier && e.shiftKey) && key.length < 2) {
           // Shift key bindings can only specified for special characters.
           return;
-        } else if (e.shiftKey) { name += 'S-'; }
+        } else if (e.shiftKey && !/^[A-Za-z]$/.test(key)) {
+          name += 'S-';
+        }
         if (key.length == 1) { key = key.toLowerCase(); }
         name += key;
         if (name.length > 1) { name = '<' + name + '>'; }
@@ -259,7 +262,8 @@
       // non-standard keyboard layouts.
       function handleKeyPress(cm, e) {
         var code = e.charCode || e.keyCode;
-        if (e.ctrlKey || e.metaKey || e.altKey) { return; }
+        if (e.ctrlKey || e.metaKey || e.altKey ||
+            e.shiftKey && code < 32) { return; }
         var name = String.fromCharCode(code);
 
         CodeMirror.signal(cm, 'vim-keypress', name);
@@ -625,16 +629,6 @@
             return true;
           }
         }
-        function handleExternalSelection() {
-          // Enter visual mode when the mouse selects text.
-          if (!vim.visualMode && !vim.insertMode &&
-              !cursorEqual(cm.getCursor('head'), cm.getCursor('anchor'))) {
-            vim.visualMode = true;
-            vim.visualLine = false;
-            CodeMirror.signal(cm, "vim-mode-change", {mode: "visual"});
-            cm.on('mousedown', exitVisualMode);
-          }
-        }
         function doKeyToKey(keys) {
           // TODO: prevent infinite recursion.
           var match;
@@ -685,12 +679,12 @@
 
         function handleKeyNonInsertMode() {
           if (handleMacroRecording() || handleEsc()) { return true; };
-          handleExternalSelection();
 
           var keys = vim.inputState.keyBuffer = vim.inputState.keyBuffer + key;
           if (/^[1-9]\d*$/.test(keys)) { return true; }
 
           var keysMatcher = /^(\d*)(.*)$/.exec(keys);
+          if (!keysMatcher) { clearInputState(cm); return false; }
           var context = vim.visualMode ? 'visual' :
                                          'normal';
           var match = commandDispatcher.matchCommand(keysMatcher[2] || keysMatcher[1], defaultKeymap, vim.inputState, context);
@@ -940,7 +934,7 @@
         var bestMatch;
         for (var i = 0; i < matches.full.length; i++) {
           var match = matches.full[i];
-          if (!bestMatch || match.context == context) {
+          if (!bestMatch) {
             bestMatch = match;
           }
         }
@@ -1502,8 +1496,8 @@
 
             var equal = cursorEqual(cursor, best);
             var between = (motionArgs.forward) ?
-              cusrorIsBetween(cursor, mark, best) :
-              cusrorIsBetween(best, mark, cursor);
+              cursorIsBetween(cursor, mark, best) :
+              cursorIsBetween(best, mark, cursor);
 
             if (equal || between) {
               best = mark;
@@ -1755,7 +1749,11 @@
           return null;
         }
 
-        return [tmp.start, tmp.end];
+        if (!cm.state.vim.visualMode) {
+          return [tmp.start, tmp.end];
+        } else {
+          return expandSelection(cm, tmp.start, tmp.end);
+        }
       },
 
       repeatLastCharacterSearch: function(cm, motionArgs) {
@@ -2629,7 +2627,13 @@
       }
       return false;
     }
-    function cusrorIsBetween(cur1, cur2, cur3) {
+    function cursorMin(cur1, cur2) {
+      return cursorIsBefore(cur1, cur2) ? cur1 : cur2;
+    }
+    function cursorMax(cur1, cur2) {
+      return cursorIsBefore(cur1, cur2) ? cur2 : cur1;
+    }
+    function cursorIsBetween(cur1, cur2, cur3) {
       // returns true if cur2 is between cur1 and cur3.
       var cur1before2 = cursorIsBefore(cur1, cur2);
       var cur2before3 = cursorIsBefore(cur2, cur3);
@@ -2856,6 +2860,33 @@
                            'visualLine': vim.visualLine,
                            'visualBlock': block};
     }
+    function expandSelection(cm, start, end) {
+      var head = cm.getCursor('head');
+      var anchor = cm.getCursor('anchor');
+      var tmp;
+      if (cursorIsBefore(end, start)) {
+        tmp = end;
+        end = start;
+        start = tmp;
+      }
+      if (cursorIsBefore(head, anchor)) {
+        head = cursorMin(start, head);
+        anchor = cursorMax(anchor, end);
+      } else {
+        anchor = cursorMin(start, anchor);
+        head = cursorMax(head, end);
+      }
+      return [anchor, head];
+    }
+    function getHead(cm) {
+      var cur = cm.getCursor('head');
+      if (cm.getSelection().length == 1) {
+        // Small corner case when only 1 character is selected. The "real"
+        // head is the left of head and anchor.
+        cur = cursorMin(cur, cm.getCursor('anchor'));
+      }
+      return cur;
+    }
 
     function exitVisualMode(cm) {
       cm.off('mousedown', exitVisualMode);
@@ -2928,7 +2959,7 @@
     }
 
     function expandWordUnderCursor(cm, inclusive, _forward, bigWord, noSymbol) {
-      var cur = cm.getCursor();
+      var cur = getHead(cm);
       var line = cm.getLine(cur.line);
       var idx = cur.ch;
 
@@ -3314,7 +3345,7 @@
     // TODO: perhaps this finagling of start and end positions belonds
     // in codmirror/replaceRange?
     function selectCompanionObject(cm, symb, inclusive) {
-      var cur = cm.getCursor(), start, end;
+      var cur = getHead(cm), start, end;
 
       var bracketRegexp = ({
         '(': /[()]/, ')': /[()]/,
@@ -3359,7 +3390,7 @@
     // have identical opening and closing symbols
     // TODO support across multiple lines
     function findBeginningAndEnd(cm, symb, inclusive) {
-      var cur = copyCursor(cm.getCursor());
+      var cur = copyCursor(getHead(cm));
       var line = cm.getLine(cur.line);
       var chars = line.split('');
       var start, end, i, len;
@@ -4696,10 +4727,7 @@
       } else if (cm.doc.history.lastSelOrigin == '*mouse') {
         // Reset lastHPos if mouse click was done in normal mode.
         vim.lastHPos = cm.doc.getCursor().ch;
-        if (cm.somethingSelected()) {
-          // If something is still selected, enter visual mode.
-          vim.visualMode = true;
-        }
+        handleExternalSelection(cm, vim);
       }
       if (vim.visualMode) {
         var from, head;
@@ -4715,6 +4743,22 @@
           vim.fakeCursor.clear();
         }
         vim.fakeCursor = cm.markText(from, to, {className: 'cm-animate-fat-cursor'});
+      }
+    }
+
+    function handleExternalSelection(cm, vim) {
+      var anchor = cm.getCursor('anchor');
+      var head = cm.getCursor('head');
+      // Enter visual mode when the mouse selects text.
+      if (!vim.visualMode && !vim.insertMode && cm.somethingSelected()) {
+        vim.visualMode = true;
+        vim.visualLine = false;
+        CodeMirror.signal(cm, "vim-mode-change", {mode: "visual"});
+        cm.on('mousedown', exitVisualMode);
+      }
+      if (vim.visualMode) {
+        updateMark(cm, vim, '<', cursorMin(head, anchor));
+        updateMark(cm, vim, '>', cursorMax(head, anchor));
       }
     }
 
